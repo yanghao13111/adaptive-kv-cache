@@ -1,0 +1,6 @@
+method: full_cache
+model: meta-llama/Llama-2-7b-hf
+context_len: 4096
+max_new_tokens: 512
+dataset: wikitext-103
+method_kwargs: {}

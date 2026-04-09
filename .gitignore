@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Experiment results (raw data; keep .gitkeep to preserve directory)
+experiments/results/*.csv
+experiments/results/*.json
+experiments/results/*.png
+experiments/results/*.pdf

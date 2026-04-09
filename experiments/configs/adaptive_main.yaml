@@ -1,0 +1,10 @@
+method: adaptive
+model: meta-llama/Llama-2-7b-hf
+context_len: 4096
+max_new_tokens: 512
+dataset: wikitext-103
+method_kwargs:
+  memory_budget_gb: 4.0
+  recent_window: 256
+  compress_dtype: int8
+  importance_layers: 4
