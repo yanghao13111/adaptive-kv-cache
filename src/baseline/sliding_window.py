@@ -42,13 +42,22 @@ def run_sliding_window(
                 past_key_values = outputs.past_key_values
 
                 # Evict oldest tokens if KV cache exceeds window_size.
-                # past_key_values: tuple of (key, value) per layer, each shape [batch, heads, seq, dim]
-                cache_len = past_key_values[0][0].shape[2]
-                if cache_len > window_size:
-                    past_key_values = tuple(
-                        (k[:, :, -window_size:, :], v[:, :, -window_size:, :])
-                        for k, v in past_key_values
-                    )
+                # Newer HuggingFace versions return a DynamicCache object instead of a tuple.
+                if hasattr(past_key_values, 'key_cache'):
+                    # DynamicCache format (transformers >= 4.38)
+                    cache_len = past_key_values.key_cache[0].shape[2]
+                    if cache_len > window_size:
+                        for i in range(len(past_key_values.key_cache)):
+                            past_key_values.key_cache[i] = past_key_values.key_cache[i][:, :, -window_size:, :]
+                            past_key_values.value_cache[i] = past_key_values.value_cache[i][:, :, -window_size:, :]
+                else:
+                    # Legacy tuple format
+                    cache_len = past_key_values[0][0].shape[2]
+                    if cache_len > window_size:
+                        past_key_values = tuple(
+                            (k[:, :, -window_size:, :], v[:, :, -window_size:, :])
+                            for k, v in past_key_values
+                        )
 
                 # Greedy decoding — take the most probable next token
                 next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
