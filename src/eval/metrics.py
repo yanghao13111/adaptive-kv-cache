@@ -93,7 +93,7 @@ def measure_latency(
             peak_memory_gb  (float)
     """
     model.eval()
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    inputs = tokenizer(prompt, return_tensors="pt", return_token_type_ids=False).to(device)
 
     # warmup — GPU has initialization overhead on first run
     with torch.no_grad():
