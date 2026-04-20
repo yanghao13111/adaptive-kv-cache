@@ -6,6 +6,8 @@ No eviction or compression; cache grows unbounded.
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from src.eval.metrics import measure_latency
+
 
 def run_full_cache(
     model: AutoModelForCausalLM,
@@ -18,7 +20,25 @@ def run_full_cache(
     Run autoregressive decoding with full KV-cache (HuggingFace default).
 
     Returns:
-        dict with keys: generated_text, latency_ms_per_token, peak_memory_gb
+        dict with keys: generated_text, latency_ms_per_token,
+                        throughput_tokens_per_sec, peak_memory_gb
     """
-    # TODO: implement
-    raise NotImplementedError
+    metrics = measure_latency(
+        model, tokenizer, prompt,
+        max_new_tokens=max_new_tokens,
+        device=device,
+    )
+
+    inputs = tokenizer(prompt, return_tensors="pt", return_token_type_ids=False).to(device)
+    with torch.no_grad():
+        output_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
+
+    generated_text = tokenizer.decode(
+        output_ids[0][inputs["input_ids"].shape[1]:],
+        skip_special_tokens=True,
+    )
+
+    return {
+        "generated_text": generated_text,
+        **metrics,
+    }
