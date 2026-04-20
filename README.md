@@ -85,10 +85,22 @@ At each decoding step, all cached tokens are classified into one of three region
 
 ## Project Roadmap
 
-- [ ] **Stage 1** — Baseline inference pipeline and full KV-cache benchmarking
+- [x] **Stage 1** — Baseline inference pipeline and full KV-cache benchmarking
 - [ ] **Stage 2** — Simple baselines: sliding-window eviction and naive truncation
 - [ ] **Stage 3** — Adaptive method: recency-aware retention, compression, budget-triggered eviction
 - [ ] **Stage 4** — Experiments across memory budgets and context lengths; analysis and writeup
+
+---
+
+## Confirmed Setup
+
+| Component | Choice | Reason |
+|-----------|--------|--------|
+| Validation model | `gpt2` | Fast, no GPU needed, quick iteration |
+| Official experiment model | `mistralai/Mistral-7B-v0.1` | No auth required, commonly used in KV cache papers, GQA architecture |
+| Primary dataset | WikiText-103 | Standard perplexity benchmark, comparable with other papers |
+| Secondary dataset | PG-19 | Very long documents (~100k tokens), stress-tests KV cache pressure |
+| Experiment environment | Google Colab Pro (A100) | Full CUDA support, bitsandbytes compatible |
 
 ---
 

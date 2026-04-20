@@ -8,10 +8,14 @@ import argparse
 import csv
 import yaml
 import torch
+import logging
 from pathlib import Path
 from datetime import datetime
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# suppress repetitive HuggingFace generation warnings
+logging.getLogger("transformers.generation.utils").setLevel(logging.ERROR)
 
 from src.eval.metrics import compute_perplexity, measure_latency
 
