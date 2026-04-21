@@ -114,7 +114,7 @@ class AdaptiveCacheManager:
 
         if n_compressible > 0:
             compressible_scores = scores[compress_start:compress_end]
-            threshold = compressible_scores.quantile(self.compress_ratio)
+            threshold = compressible_scores.float().quantile(self.compress_ratio)
 
             for i in range(compress_start, compress_end):
                 if i not in self._compressed and compressible_scores[i - compress_start] <= threshold:
