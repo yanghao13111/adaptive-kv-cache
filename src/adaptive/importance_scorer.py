@@ -1,6 +1,6 @@
 """
 Attention-based importance scoring for KV-cache tokens.
-Scores are derived from accumulated attention weights across recent layers.
+Scores are derived from accumulated attention weights across all layers.
 """
 
 import torch
@@ -10,43 +10,88 @@ from torch import Tensor
 class ImportanceScorer:
     """
     Scores each cached token by how much attention it has received
-    over the last L decoder layers.
+    across all decoder layers and all decoding steps so far.
 
     Higher score → token is more important → keep in cache.
+
+    Score is the cumulative sum of attention weights this token received
+    as a key, averaged across all attention heads, summed across all layers.
     """
 
-    def __init__(self, num_layers: int = 4):
+    def __init__(self, num_layers: int = 12):
         """
         Args:
-            num_layers: Number of recent layers whose attention weights
-                        are aggregated for the importance score.
+            num_layers: Total number of transformer layers in the model.
         """
         self.num_layers = num_layers
-        # attention_accumulator[layer_idx] -> Tensor of shape (seq_len,)
-        self._attention_accumulator: list[Tensor] = []
+        # Accumulated importance scores, shape (seq_len,). Grows as new tokens are added.
+        self._scores: Tensor | None = None
 
-    def update(self, attention_weights: Tensor, layer_idx: int) -> None:
+    def update(self, attentions: tuple[Tensor, ...]) -> None:
         """
-        Ingest attention weights from one decoding step / one layer.
+        Update importance scores from one full decoding step.
 
         Args:
-            attention_weights: shape (batch, heads, 1, seq_len) — weights
-                               for the newly generated token over all cached tokens.
-            layer_idx: which layer these weights come from.
+            attentions: tuple of length num_layers, each tensor has shape
+                        (batch, heads, query_len, key_len).
+                        query_len is 1 for autoregressive decoding (one new token).
+                        key_len is the current cache length.
         """
-        # TODO: implement
-        raise NotImplementedError
+        # Sum attention across all layers and average across heads.
+        # Each layer contributes equally to the importance score.
+        # Result shape: (key_len,)
+        step_scores = None
+        for layer_attn in attentions:
+            # layer_attn: (batch, heads, 1, key_len) — squeeze batch and query dims
+            layer_scores = layer_attn[0, :, -1, :].mean(dim=0)  # (key_len,)
+            if step_scores is None:
+                step_scores = layer_scores
+            else:
+                step_scores = step_scores + layer_scores
+
+        if step_scores is None:
+            return
+
+        if self._scores is None:
+            self._scores = step_scores
+        else:
+            # Cache grew by one token (the newly generated one starts with score 0)
+            current_len = step_scores.shape[0]
+            if self._scores.shape[0] < current_len:
+                padding = torch.zeros(
+                    current_len - self._scores.shape[0],
+                    device=self._scores.device,
+                    dtype=self._scores.dtype,
+                )
+                self._scores = torch.cat([self._scores, padding], dim=0)
+
+            self._scores = self._scores + step_scores
 
     def score(self, seq_len: int) -> Tensor:
         """
-        Return an importance score for each of the seq_len cached tokens.
+        Return importance scores for the current cached tokens.
+
+        Args:
+            seq_len: Current cache length.
 
         Returns:
             Tensor of shape (seq_len,), higher = more important.
+            Returns uniform scores if no updates have been recorded yet.
         """
-        # TODO: implement
-        raise NotImplementedError
+        if self._scores is None:
+            return torch.ones(seq_len)
+
+        # Trim or pad to match current seq_len
+        if self._scores.shape[0] >= seq_len:
+            return self._scores[:seq_len]
+        else:
+            padding = torch.zeros(
+                seq_len - self._scores.shape[0],
+                device=self._scores.device,
+                dtype=self._scores.dtype,
+            )
+            return torch.cat([self._scores, padding], dim=0)
 
     def reset(self) -> None:
-        """Clear accumulated attention statistics (call between sequences)."""
-        self._attention_accumulator = []
+        """Clear accumulated scores (call between sequences)."""
+        self._scores = None
