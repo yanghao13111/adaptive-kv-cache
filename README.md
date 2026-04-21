@@ -87,7 +87,7 @@ At each decoding step, all cached tokens are classified into one of three region
 
 - [x] **Stage 1** — Baseline inference pipeline and full KV-cache benchmarking
 - [x] **Stage 2** — Simple baselines: sliding-window eviction and naive truncation
-- [ ] **Stage 3** — Adaptive method: recency-aware retention, compression, budget-triggered eviction
+- [x] **Stage 3** — Adaptive method: recency-aware retention, compression, budget-triggered eviction
 - [ ] **Stage 4** — Experiments across memory budgets and context lengths; analysis and writeup
 
 ---
