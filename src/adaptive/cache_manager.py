@@ -33,6 +33,8 @@ class AdaptiveCacheManager:
         compress_dtype: DType = "int8",
         num_layers: int = 12,
         compress_ratio: float = 0.5,
+        sink_tokens: int = 4,
+        score_decay: float = 0.9,
     ):
         """
         Args:
@@ -41,15 +43,19 @@ class AdaptiveCacheManager:
             compress_dtype:   Quantization dtype for moderate-tier tokens.
             num_layers:       Number of transformer layers (for ImportanceScorer).
             compress_ratio:   Fraction of non-recent tokens to compress (0.5 = bottom 50% by score get compressed).
+            sink_tokens:      Number of initial prompt tokens protected as attention sinks.
+            score_decay:      Exponential decay factor applied to scores each step (0.9 default).
         """
         self.recent_window = recent_window
         self.compress_ratio = compress_ratio
+        self.sink_tokens = sink_tokens
 
-        self.scorer = ImportanceScorer(num_layers=num_layers)
+        self.scorer = ImportanceScorer(num_layers=num_layers, score_decay=score_decay)
         self.compressor = CacheCompressor(dtype=compress_dtype)
         self.eviction_policy = EvictionPolicy(
             memory_budget_gb=memory_budget_gb,
             recent_window=recent_window,
+            sink_tokens=sink_tokens,
         )
 
         # Track compression state per token: index → metadata (None = full precision)
@@ -101,14 +107,17 @@ class AdaptiveCacheManager:
         # 4. Compress moderate-tier tokens (outside recent window, not yet compressed)
         seq_len = past_key_values.get_seq_length()
         scores = self.scorer.score(seq_len)
-        n_compressible = max(0, seq_len - self.recent_window)
+        # Compressible range mirrors evictable range: exclude sink tokens and recent window
+        compress_start = self.sink_tokens
+        compress_end = max(compress_start, seq_len - self.recent_window)
+        n_compressible = compress_end - compress_start
 
         if n_compressible > 0:
-            compressible_scores = scores[:n_compressible]
+            compressible_scores = scores[compress_start:compress_end]
             threshold = compressible_scores.quantile(self.compress_ratio)
 
-            for i in range(n_compressible):
-                if i not in self._compressed and compressible_scores[i] <= threshold:
+            for i in range(compress_start, compress_end):
+                if i not in self._compressed and compressible_scores[i - compress_start] <= threshold:
                     for layer in past_key_values.layers:
                         token_k = layer.keys[:, :, i:i+1, :]
                         token_v = layer.values[:, :, i:i+1, :]

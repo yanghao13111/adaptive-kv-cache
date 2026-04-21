@@ -14,16 +14,23 @@ class ImportanceScorer:
 
     Higher score → token is more important → keep in cache.
 
-    Score is the cumulative sum of attention weights this token received
-    as a key, averaged across all attention heads, summed across all layers.
+    Score is the exponentially decayed sum of attention weights this token
+    received as a key, averaged across all attention heads, summed across
+    all layers. Decay prevents early tokens from accumulating inflated scores
+    simply by having been present longer.
     """
 
-    def __init__(self, num_layers: int = 12):
+    def __init__(self, num_layers: int = 12, score_decay: float = 0.9):
         """
         Args:
-            num_layers: Total number of transformer layers in the model.
+            num_layers:  Total number of transformer layers in the model.
+            score_decay: Multiplicative decay applied to existing scores each
+                         step before adding new attention weights. 0.9 means
+                         scores from 10 steps ago retain ~35% of their value.
+                         Set to 1.0 to disable decay (pure cumulative sum).
         """
         self.num_layers = num_layers
+        self.score_decay = score_decay
         # Accumulated importance scores, shape (seq_len,). Grows as new tokens are added.
         self._scores: Tensor | None = None
 
@@ -67,7 +74,8 @@ class ImportanceScorer:
                 )
                 self._scores = torch.cat([self._scores, padding], dim=0)
 
-            self._scores = self._scores + step_scores
+            # Decay before accumulating so older attention receives less weight
+            self._scores = self._scores * self.score_decay + step_scores
 
     def score(self, seq_len: int) -> Tensor:
         """
