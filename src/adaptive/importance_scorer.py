@@ -42,7 +42,9 @@ class ImportanceScorer:
         # Result shape: (key_len,)
         step_scores = None
         for layer_attn in attentions:
-            # layer_attn: (batch, heads, 1, key_len) — squeeze batch and query dims
+            if layer_attn is None:
+                continue
+            # layer_attn: (batch, heads, query_len, key_len) — take last query position
             layer_scores = layer_attn[0, :, -1, :].mean(dim=0)  # (key_len,)
             if step_scores is None:
                 step_scores = layer_scores

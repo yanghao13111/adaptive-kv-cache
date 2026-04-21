@@ -59,8 +59,8 @@ class CacheCompressor:
 
         # Avoid division by zero for constant vectors
         scale = (t_max - t_min).clamp(min=1e-8) / (self.qmax - self.qmin)
-        zero_point = self.qmin - (t_min / scale)
-        zero_point = zero_point.round().clamp(self.qmin, self.qmax)
+        # zero_point maps t_min exactly to qmin — must NOT be clamped
+        zero_point = (self.qmin - t_min / scale).round()
 
         quantized = ((tensor_fp32 / scale) + zero_point).round().clamp(self.qmin, self.qmax)
         quantized = quantized.to(self.torch_dtype)
