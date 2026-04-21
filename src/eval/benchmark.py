@@ -219,11 +219,11 @@ def build_cache_fn(config: dict, model: AutoModelForCausalLM):
         window_size = kwargs.get("window_size", 256)
 
         def sliding_fn(past_key_values, attentions):
-            cache_len = past_key_values.key_cache[0].shape[2]
+            cache_len = past_key_values.layers[0].keys.shape[2]
             if cache_len > window_size:
-                for layer_idx in range(len(past_key_values.key_cache)):
-                    past_key_values.key_cache[layer_idx] = past_key_values.key_cache[layer_idx][:, :, -window_size:, :]
-                    past_key_values.value_cache[layer_idx] = past_key_values.value_cache[layer_idx][:, :, -window_size:, :]
+                for layer in past_key_values.layers:
+                    layer.keys = layer.keys[:, :, -window_size:, :]
+                    layer.values = layer.values[:, :, -window_size:, :]
             return past_key_values
 
         return sliding_fn, None

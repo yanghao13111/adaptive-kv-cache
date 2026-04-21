@@ -44,11 +44,11 @@ def run_sliding_window(
                 # Evict oldest tokens if KV cache exceeds window_size.
                 # DynamicCache stores keys/values per layer; we slice the seq dimension to keep last window_size tokens.
                 # crop(N) keeps the first N tokens so we cannot use it for sliding window (we want the last N).
-                cache_len = past_key_values.key_cache[0].shape[2]
+                cache_len = past_key_values.layers[0].keys.shape[2]
                 if cache_len > window_size:
-                    for layer_idx in range(len(past_key_values.key_cache)):
-                        past_key_values.key_cache[layer_idx] = past_key_values.key_cache[layer_idx][:, :, -window_size:, :]
-                        past_key_values.value_cache[layer_idx] = past_key_values.value_cache[layer_idx][:, :, -window_size:, :]
+                    for layer in past_key_values.layers:
+                        layer.keys = layer.keys[:, :, -window_size:, :]
+                        layer.values = layer.values[:, :, -window_size:, :]
 
                 # Greedy decoding — take the most probable next token
                 next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
