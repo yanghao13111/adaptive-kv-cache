@@ -71,9 +71,13 @@ At each decoding step, all cached tokens are classified into one of three region
      evict           compress            full precision
 ```
 
-**Importance scoring** uses a lightweight attention-based heuristic: the accumulated attention weight a token has received across the last *L* layers. Tokens that are rarely attended to are candidates for compression or eviction.
+**Importance scoring** uses an exponentially decayed attention heuristic: each step, existing scores are multiplied by a decay factor (default 0.9) before adding the new step's attention weights. This prevents early tokens from accumulating inflated scores simply by being present longer, ensuring eviction targets tokens that are *currently* unimportant.
 
-**Memory budget** is set as a fixed GPU memory cap (e.g., 4 GB for the KV cache). When the cache exceeds this budget, the lowest-scored tokens in the oldest tier are evicted first.
+**Protected zones** — two token groups are never evicted or compressed:
+- **Attention sinks** (first 4 tokens): the model routes disproportionate attention to initial tokens regardless of content ([StreamingLLM](https://arxiv.org/abs/2309.17453)). Evicting them causes perplexity spikes on long sequences.
+- **Recent window** (last 256 tokens): newly generated tokens have not yet accumulated enough attention history to score fairly.
+
+**Memory budget** is set as a fixed GPU memory cap (e.g., 4 GB for the KV cache). When the cache exceeds this budget, the lowest-scored tokens in the evictable zone are removed first.
 
 ### Baselines
 
