@@ -80,13 +80,14 @@ class AdaptiveCacheManager:
         # 1. Update importance scores
         self.scorer.update(attentions)
 
-        seq_len = past_key_values.get_seq_length()
+        # Read seq_len directly from key_cache so it reflects prior evictions
+        seq_len = past_key_values.key_cache[0].shape[2]
         scores = self.scorer.score(seq_len)
 
         # 2. Estimate current cache memory (keys + values, all layers, FP16 = 2 bytes)
-        n_layers = len(past_key_values.layers)
-        head_dim = past_key_values.layers[0].keys.shape[-1]
-        n_heads = past_key_values.layers[0].keys.shape[1]
+        n_layers = len(past_key_values.key_cache)
+        head_dim = past_key_values.key_cache[0].shape[-1]
+        n_heads = past_key_values.key_cache[0].shape[1]
         bytes_per_token = n_layers * n_heads * head_dim * 2 * 2  # keys + values, FP16
 
         current_bytes = seq_len * bytes_per_token
@@ -98,16 +99,13 @@ class AdaptiveCacheManager:
 
             if len(evict_indices) > 0:
                 past_key_values = self._remove_tokens(past_key_values, evict_indices)
-                # Remove evicted tokens from compression state
                 for idx in evict_indices.tolist():
                     self._compressed.pop(idx, None)
-                # Update scorer to reflect removed tokens
                 self.scorer.reset()
 
         # 4. Compress moderate-tier tokens (outside recent window, not yet compressed)
-        seq_len = past_key_values.get_seq_length()
+        seq_len = past_key_values.key_cache[0].shape[2]
         scores = self.scorer.score(seq_len)
-        # Compressible range mirrors evictable range: exclude sink tokens and recent window
         compress_start = self.sink_tokens
         compress_end = max(compress_start, seq_len - self.recent_window)
         n_compressible = compress_end - compress_start
@@ -118,31 +116,27 @@ class AdaptiveCacheManager:
 
             for i in range(compress_start, compress_end):
                 if i not in self._compressed and compressible_scores[i - compress_start] <= threshold:
-                    for layer in past_key_values.layers:
-                        token_k = layer.keys[:, :, i:i+1, :]
-                        token_v = layer.values[:, :, i:i+1, :]
+                    for layer_idx in range(len(past_key_values.key_cache)):
+                        token_k = past_key_values.key_cache[layer_idx][:, :, i:i+1, :]
+                        token_v = past_key_values.value_cache[layer_idx][:, :, i:i+1, :]
                         q_k, meta_k = self.compressor.compress(token_k)
                         q_v, meta_v = self.compressor.compress(token_v)
-                        layer.keys[:, :, i:i+1, :] = self.compressor.decompress(q_k, meta_k)
-                        layer.values[:, :, i:i+1, :] = self.compressor.decompress(q_v, meta_v)
+                        past_key_values.key_cache[layer_idx][:, :, i:i+1, :] = self.compressor.decompress(q_k, meta_k)
+                        past_key_values.value_cache[layer_idx][:, :, i:i+1, :] = self.compressor.decompress(q_v, meta_v)
                     self._compressed[i] = True
 
         return past_key_values
 
     def _remove_tokens(self, past_key_values, indices: Tensor):
         """Remove tokens at given indices from all layers of the cache."""
-        seq_len = past_key_values.layers[0].keys.shape[2]
-        print(f"DEBUG _remove_tokens: seq_len={seq_len}, indices={indices.shape}, min={indices.min()}, max={indices.max()}, device={indices.device}")
+        seq_len = past_key_values.key_cache[0].shape[2]
 
-        for i, layer in enumerate(past_key_values.layers):
-            layer_seq = layer.keys.shape[2]
-            if layer_seq != seq_len:
-                print(f"DEBUG layer {i}: keys.shape={layer.keys.shape}, expected seq_len={seq_len}")
-            device = layer.keys.device
+        for layer_idx in range(len(past_key_values.key_cache)):
+            device = past_key_values.key_cache[layer_idx].device
             keep_mask = torch.ones(seq_len, dtype=torch.bool, device=device)
             keep_mask[indices.to(device)] = False
-            layer.keys = layer.keys[:, :, keep_mask, :]
-            layer.values = layer.values[:, :, keep_mask, :]
+            past_key_values.key_cache[layer_idx] = past_key_values.key_cache[layer_idx][:, :, keep_mask, :]
+            past_key_values.value_cache[layer_idx] = past_key_values.value_cache[layer_idx][:, :, keep_mask, :]
 
         return past_key_values
 
