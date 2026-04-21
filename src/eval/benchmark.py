@@ -33,9 +33,12 @@ def load_texts(dataset_name: str, num_samples: int = 100) -> list[str]:
     if dataset_name == "wikitext-103":
         dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split="test")
         texts = [x["text"] for x in dataset if len(x["text"].split()) > 100]
-    elif dataset_name == "pg19":
-        dataset = load_dataset("deepmind/pg19", split="test", trust_remote_code=False)
-        texts = [x["book_text"][:50000] for x in dataset if len(x["book_text"]) > 1000]
+    elif dataset_name == "longbench":
+        # LongBench qasper: avg 3600 words, max 14640 words — stresses KV cache at long context.
+        # Requires datasets < 4.0.0 (trust_remote_code=True).
+        # Used in H2O and SnapKV papers for long-context evaluation.
+        dataset = load_dataset("THUDM/LongBench", "qasper", split="test", trust_remote_code=True)
+        texts = [x["context"] for x in dataset if len(x["context"].split()) > 500]
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 

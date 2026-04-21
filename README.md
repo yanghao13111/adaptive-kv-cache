@@ -103,7 +103,7 @@ At each decoding step, all cached tokens are classified into one of three region
 | Validation model | `gpt2` | Fast, no GPU needed, quick iteration |
 | Official experiment model | `mistralai/Mistral-7B-v0.1` | No auth required, commonly used in KV cache papers, GQA architecture |
 | Primary dataset | WikiText-103 | Standard perplexity benchmark, comparable with other papers |
-| Secondary dataset | PG-19 | Very long documents (~100k tokens), stress-tests KV cache pressure |
+| Secondary dataset | LongBench (qasper) | Long-context evaluation (avg 3600 words), used in H2O and SnapKV papers |
 | Experiment environment | Google Colab Pro (A100) | Full CUDA support, bitsandbytes compatible |
 
 ---
@@ -166,6 +166,17 @@ python src/eval/benchmark.py \
 ## Results
 
 > *(To be filled in after experiments are complete)*
+
+**WikiText-103** (context_len=2048)
+
+| Method | Peak Memory (GB) | Latency (ms/tok) | Throughput (tok/s) | Perplexity |
+|--------|-----------------|------------------|--------------------|------------|
+| Full KV cache | — | — | — | — |
+| Sliding window | — | — | — | — |
+| Naive truncation | — | — | — | — |
+| **Adaptive (ours)** | — | — | — | — |
+
+**LongBench / qasper** (context_len=4096)
 
 | Method | Peak Memory (GB) | Latency (ms/tok) | Throughput (tok/s) | Perplexity |
 |--------|-----------------|------------------|--------------------|------------|
