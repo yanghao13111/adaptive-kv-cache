@@ -34,8 +34,8 @@ def load_texts(dataset_name: str, num_samples: int = 100) -> list[str]:
         dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split="test")
         texts = [x["text"] for x in dataset if len(x["text"].split()) > 100]
     elif dataset_name == "pg19":
-        dataset = load_dataset("pg19", split="test")
-        texts = [x["text"][:50000] for x in dataset if len(x["text"]) > 1000]
+        dataset = load_dataset("deepmind/pg19", split="test", trust_remote_code=False)
+        texts = [x["book_text"][:50000] for x in dataset if len(x["book_text"]) > 1000]
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
