@@ -65,10 +65,13 @@ def build_method(config: dict, model: AutoModelForCausalLM, tokenizer: AutoToken
 
     elif method == "adaptive":
         from src.adaptive.cache_manager import AdaptiveCacheManager
-        from src.models.patched_attention import patch_model
-        cache_manager = AdaptiveCacheManager(**kwargs)
-        patch_model(model, cache_manager)
-        raise NotImplementedError("Adaptive decoding runner not yet implemented")
+        from src.models.patched_attention import run_adaptive
+        num_layers = model.config.num_hidden_layers
+        cache_manager = AdaptiveCacheManager(num_layers=num_layers, **kwargs)
+        return lambda prompt: run_adaptive(
+            model, tokenizer, prompt, cache_manager,
+            max_new_tokens=max_new_tokens, device=device,
+        )
 
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -107,6 +110,182 @@ def run_benchmark(config: dict, model: AutoModelForCausalLM, tokenizer: AutoToke
         model, tokenizer, texts,
         device=device,
         max_length=config.get("context_len", 4096),
+    )
+
+    return {
+        "method": config["method"],
+        "model": config["model"],
+        "dataset": dataset_name,
+        "num_samples": len(texts),
+        "avg_latency_ms_per_token": round(sum(latencies) / len(latencies), 4),
+        "avg_throughput_tokens_per_sec": round(sum(throughputs) / len(throughputs), 4),
+        "avg_peak_memory_gb": round(sum(memories) / len(memories), 4),
+        "perplexity": round(perplexity, 4),
+    }
+
+
+def compute_perplexity_with_cache(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    texts: list[str],
+    cache_update_fn=None,
+    cache_reset_fn=None,
+    device: str = "cuda",
+    max_length: int = 2048,
+) -> float:
+    """
+    Compute perplexity autoregressively under a specific cache management strategy.
+
+    Unlike compute_perplexity() which uses teacher-forcing (full context always
+    visible), this function runs token-by-token decoding and applies cache_update_fn
+    after each step. This means the model genuinely operates under the eviction or
+    compression constraints, giving a realistic perplexity for that method.
+
+    Args:
+        texts:           Reference texts to evaluate on.
+        cache_update_fn: Called after each decoding step as
+                         fn(past_key_values, attentions) -> past_key_values.
+                         Pass None for full-cache (no eviction).
+                         Attentions are always captured and passed; the fn may
+                         ignore them if not needed (e.g. sliding window).
+        cache_reset_fn:  Called between texts to reset any stateful cache manager
+                         (e.g. AdaptiveCacheManager.reset). Pass None if stateless.
+        max_length:      Maximum number of tokens to evaluate per text.
+
+    Returns:
+        Average perplexity across all texts (lower is better).
+    """
+    model.eval()
+    total_nll = 0.0
+    total_tokens = 0
+
+    with torch.no_grad():
+        for text in texts:
+            if cache_reset_fn is not None:
+                cache_reset_fn()
+
+            input_ids = tokenizer(text, return_tensors="pt").input_ids.to(device)
+            input_ids = input_ids[:, :max_length]
+            seq_len = input_ids.shape[1]
+            if seq_len < 2:
+                continue
+
+            past_key_values = None
+            # Feed first token without scoring, then score each subsequent token
+            for pos in range(seq_len - 1):
+                current_ids = input_ids[:, pos:pos + 1]
+                outputs = model(
+                    current_ids,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    output_attentions=(cache_update_fn is not None),
+                )
+                past_key_values = outputs.past_key_values
+
+                if cache_update_fn is not None:
+                    past_key_values = cache_update_fn(past_key_values, outputs.attentions)
+
+                # Score the next token
+                log_probs = torch.log_softmax(outputs.logits[:, -1, :], dim=-1)
+                next_token_id = input_ids[0, pos + 1].item()
+                total_nll -= log_probs[0, next_token_id].item()
+                total_tokens += 1
+
+    if total_tokens == 0:
+        raise ValueError("No tokens were evaluated — check that texts are non-empty.")
+
+    return float(torch.exp(torch.tensor(total_nll / total_tokens)).item())
+
+
+def build_cache_fn(config: dict, model: AutoModelForCausalLM):
+    """
+    Return (cache_update_fn, cache_reset_fn) for compute_perplexity_with_cache().
+
+    cache_update_fn: fn(past_key_values, attentions) -> past_key_values, or None.
+    cache_reset_fn:  fn() called between texts to clear stateful managers, or None.
+    """
+    method = config["method"]
+    kwargs = config.get("method_kwargs", {})
+
+    if method in ("full_cache", "naive_truncation"):
+        return None, None
+
+    elif method == "sliding_window":
+        window_size = kwargs.get("window_size", 256)
+
+        def sliding_fn(past_key_values, attentions):
+            for layer in past_key_values.layers:
+                if layer.keys.shape[2] > window_size:
+                    layer.keys = layer.keys[:, :, -window_size:, :]
+                    layer.values = layer.values[:, :, -window_size:, :]
+            return past_key_values
+
+        return sliding_fn, None
+
+    elif method == "adaptive":
+        from src.adaptive.cache_manager import AdaptiveCacheManager
+        num_layers = model.config.num_hidden_layers
+        cache_manager = AdaptiveCacheManager(num_layers=num_layers, **kwargs)
+        return cache_manager.step, cache_manager.reset
+
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+
+def run_benchmark_official(
+    config: dict,
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+) -> dict:
+    """
+    Stage 4 benchmark: evaluates each method with its own cache management strategy.
+
+    Perplexity is computed autoregressively via compute_perplexity_with_cache(),
+    so eviction and compression genuinely affect the scores — unlike run_benchmark()
+    which uses teacher-forcing and gives identical perplexity for all methods.
+
+    Args:
+        config: Same format as run_benchmark(). 'method' and 'method_kwargs' are used
+                to build the appropriate cache_update_fn.
+
+    Returns:
+        Dict with latency, throughput, memory, and perplexity metrics.
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dataset_name = config.get("dataset", "wikitext-103")
+    num_samples = config.get("num_samples", 50)
+    max_length = config.get("context_len", 2048)
+
+    print(f"Loading dataset: {dataset_name} ({num_samples} samples)")
+    texts = load_texts(dataset_name, num_samples=num_samples)
+
+    run_fn = build_method(config, model, tokenizer)
+
+    # Latency and memory
+    print("Running latency benchmark...")
+    latencies, throughputs, memories = [], [], []
+    for i, text in enumerate(texts):
+        result = run_fn(text[:500])
+        latencies.append(result["latency_ms_per_token"])
+        throughputs.append(result["throughput_tokens_per_sec"])
+        memories.append(result["peak_memory_gb"])
+        if (i + 1) % 10 == 0:
+            print(f"  [{i+1}/{len(texts)}] avg latency: {sum(latencies)/len(latencies):.2f} ms/token")
+
+    # Perplexity under this method's cache strategy
+    print("Computing perplexity (autoregressive)...")
+    cache_fn, reset_fn = build_cache_fn(config, model)
+
+    # Naive truncation: evaluate only on the first max_cache_size tokens
+    eval_max_length = config.get("method_kwargs", {}).get("max_cache_size", max_length) \
+        if config["method"] == "naive_truncation" else max_length
+
+    perplexity = compute_perplexity_with_cache(
+        model, tokenizer, texts,
+        cache_update_fn=cache_fn,
+        cache_reset_fn=reset_fn,
+        device=device,
+        max_length=eval_max_length,
     )
 
     return {

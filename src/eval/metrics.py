@@ -128,10 +128,13 @@ def measure_latency(
 
 
 def get_peak_memory_gb() -> float:
-    """Return peak GPU memory allocated since last reset, in GB."""
+    """Return peak GPU memory allocated since last reset, in GB. Returns 0 on CPU."""
+    if not torch.cuda.is_available():
+        return 0.0
     return torch.cuda.max_memory_allocated() / 1024 ** 3
 
 
 def reset_peak_memory() -> None:
-    """Reset the peak GPU memory counter."""
-    torch.cuda.reset_peak_memory_stats()
+    """Reset the peak GPU memory counter. No-op on CPU."""
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
