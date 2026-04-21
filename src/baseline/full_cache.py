@@ -15,6 +15,7 @@ def run_full_cache(
     prompt: str,
     max_new_tokens: int = 512,
     device: str = "cuda",
+    warmup_steps: int = 2,
 ) -> dict:
     """
     Run autoregressive decoding with full KV-cache (HuggingFace default).
@@ -27,6 +28,7 @@ def run_full_cache(
         model, tokenizer, prompt,
         max_new_tokens=max_new_tokens,
         device=device,
+        warmup_steps=warmup_steps,
     )
 
     inputs = tokenizer(prompt, return_tensors="pt", return_token_type_ids=False).to(device)

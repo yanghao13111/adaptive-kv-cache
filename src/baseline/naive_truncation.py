@@ -17,6 +17,7 @@ def run_naive_truncation(
     max_cache_size: int = 1024,
     max_new_tokens: int = 512,
     device: str = "cuda",
+    warmup_steps: int = 2,
 ) -> dict:
     """
     Run autoregressive decoding with hard prompt truncation.
@@ -42,6 +43,7 @@ def run_naive_truncation(
         model, tokenizer, truncated_prompt,
         max_new_tokens=max_new_tokens,
         device=device,
+        warmup_steps=warmup_steps,
     )
 
     with torch.no_grad():

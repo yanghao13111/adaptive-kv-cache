@@ -47,9 +47,10 @@ def load_texts(dataset_name: str, num_samples: int = 100) -> list[str]:
     return texts[:num_samples]
 
 
-def build_method(config: dict, model: AutoModelForCausalLM, tokenizer: AutoTokenizer):
+def build_method(config: dict, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, warmup_steps: int = 2):
     """
     Return a callable fn(prompt) -> dict based on config method.
+    Pass warmup_steps=0 after an initial warmup to avoid per-sample warmup overhead.
     """
     method = config["method"]
     kwargs = config.get("method_kwargs", {})
@@ -58,15 +59,15 @@ def build_method(config: dict, model: AutoModelForCausalLM, tokenizer: AutoToken
 
     if method == "full_cache":
         from src.baseline.full_cache import run_full_cache
-        return lambda prompt: run_full_cache(model, tokenizer, prompt, max_new_tokens=max_new_tokens, device=device)
+        return lambda prompt: run_full_cache(model, tokenizer, prompt, max_new_tokens=max_new_tokens, device=device, warmup_steps=warmup_steps)
 
     elif method == "sliding_window":
         from src.baseline.sliding_window import run_sliding_window
-        return lambda prompt: run_sliding_window(model, tokenizer, prompt, max_new_tokens=max_new_tokens, device=device, **kwargs)
+        return lambda prompt: run_sliding_window(model, tokenizer, prompt, max_new_tokens=max_new_tokens, device=device, warmup_steps=warmup_steps, **kwargs)
 
     elif method == "naive_truncation":
         from src.baseline.naive_truncation import run_naive_truncation
-        return lambda prompt: run_naive_truncation(model, tokenizer, prompt, max_new_tokens=max_new_tokens, device=device, **kwargs)
+        return lambda prompt: run_naive_truncation(model, tokenizer, prompt, max_new_tokens=max_new_tokens, device=device, warmup_steps=warmup_steps, **kwargs)
 
     elif method == "adaptive":
         from src.adaptive.cache_manager import AdaptiveCacheManager
@@ -75,7 +76,7 @@ def build_method(config: dict, model: AutoModelForCausalLM, tokenizer: AutoToken
         cache_manager = AdaptiveCacheManager(num_layers=num_layers, **kwargs)
         return lambda prompt: run_adaptive(
             model, tokenizer, prompt, cache_manager,
-            max_new_tokens=max_new_tokens, device=device,
+            max_new_tokens=max_new_tokens, device=device, warmup_steps=warmup_steps,
         )
 
     else:
@@ -263,7 +264,13 @@ def run_benchmark_official(
     print(f"Loading dataset: {dataset_name} ({num_samples} samples)")
     texts = load_texts(dataset_name, num_samples=num_samples)
 
-    run_fn = build_method(config, model, tokenizer)
+    # Single warmup run to bring GPU to steady state before timing any samples
+    print("Warming up GPU...")
+    warmup_fn = build_method(config, model, tokenizer, warmup_steps=2)
+    warmup_fn(texts[0][:500])
+
+    # Build the actual benchmark runner with no per-sample warmup
+    run_fn = build_method(config, model, tokenizer, warmup_steps=0)
 
     # Latency and memory
     latencies, throughputs, memories = [], [], []
