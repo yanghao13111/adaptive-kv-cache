@@ -132,10 +132,11 @@ class AdaptiveCacheManager:
     def _remove_tokens(self, past_key_values, indices: Tensor):
         """Remove tokens at given indices from all layers of the cache."""
         seq_len = past_key_values.layers[0].keys.shape[2]
-        keep_mask = torch.ones(seq_len, dtype=torch.bool, device=past_key_values.layers[0].keys.device)
-        keep_mask[indices] = False
 
         for layer in past_key_values.layers:
+            device = layer.keys.device
+            keep_mask = torch.ones(seq_len, dtype=torch.bool, device=device)
+            keep_mask[indices.to(device)] = False
             layer.keys = layer.keys[:, :, keep_mask, :]
             layer.values = layer.values[:, :, keep_mask, :]
 
