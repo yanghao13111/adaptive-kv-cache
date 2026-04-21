@@ -17,6 +17,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # suppress repetitive HuggingFace generation warnings
 logging.getLogger("transformers.generation.utils").setLevel(logging.ERROR)
 
+from tqdm.auto import tqdm
+
 from src.eval.metrics import compute_perplexity, measure_latency
 
 
@@ -163,7 +165,7 @@ def compute_perplexity_with_cache(
     total_tokens = 0
 
     with torch.no_grad():
-        for text in texts:
+        for text in tqdm(texts, desc="Perplexity"):
             if cache_reset_fn is not None:
                 cache_reset_fn()
 
@@ -174,8 +176,7 @@ def compute_perplexity_with_cache(
                 continue
 
             past_key_values = None
-            # Feed first token without scoring, then score each subsequent token
-            for pos in range(seq_len - 1):
+            for pos in tqdm(range(seq_len - 1), desc=f"  tokens", leave=False):
                 current_ids = input_ids[:, pos:pos + 1]
                 outputs = model(
                     current_ids,
@@ -265,15 +266,12 @@ def run_benchmark_official(
     run_fn = build_method(config, model, tokenizer)
 
     # Latency and memory
-    print("Running latency benchmark...")
     latencies, throughputs, memories = [], [], []
-    for i, text in enumerate(texts):
+    for text in tqdm(texts, desc="Latency"):
         result = run_fn(text[:500])
         latencies.append(result["latency_ms_per_token"])
         throughputs.append(result["throughput_tokens_per_sec"])
         memories.append(result["peak_memory_gb"])
-        if (i + 1) % 10 == 0:
-            print(f"  [{i+1}/{len(texts)}] avg latency: {sum(latencies)/len(latencies):.2f} ms/token")
 
     # Perplexity under this method's cache strategy
     print("Computing perplexity (autoregressive)...")

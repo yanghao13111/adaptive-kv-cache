@@ -92,7 +92,9 @@ At each decoding step, all cached tokens are classified into one of three region
 - [x] **Stage 1** — Baseline inference pipeline and full KV-cache benchmarking
 - [x] **Stage 2** — Simple baselines: sliding-window eviction and naive truncation
 - [x] **Stage 3** — Adaptive method: recency-aware retention, compression, budget-triggered eviction
-- [ ] **Stage 4** — Experiments across memory budgets and context lengths; analysis and writeup
+- [ ] **Stage 4** — Official experiments on Mistral-7B: WikiText-103 (2048 tokens) + LongBench qasper (4096 tokens)
+- [ ] **Stage 5** — Ablation sweep: memory budget, recent window size, compress dtype
+- [ ] **Stage 6** — Results visualization and writeup
 
 ---
 
