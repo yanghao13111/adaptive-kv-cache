@@ -19,7 +19,7 @@ logging.getLogger("transformers.generation.utils").setLevel(logging.ERROR)
 
 from tqdm.auto import tqdm
 
-from src.eval.metrics import compute_perplexity, measure_latency
+from src.eval.metrics import compute_perplexity, measure_latency, measure_kv_cache_gb
 
 
 def load_config(config_path: str) -> dict:
@@ -159,11 +159,14 @@ def compute_perplexity_with_cache(
         max_length:      Maximum number of tokens to evaluate per text.
 
     Returns:
-        Average perplexity across all texts (lower is better).
+        Tuple of (perplexity, avg_kv_cache_gb):
+            perplexity:      Average perplexity across all texts (lower is better).
+            avg_kv_cache_gb: Average KV cache size at end of each text (GB).
     """
     model.eval()
     total_nll = 0.0
     total_tokens = 0
+    kv_cache_sizes = []
 
     with torch.no_grad():
         for text in tqdm(texts, desc="Perplexity"):
@@ -196,10 +199,14 @@ def compute_perplexity_with_cache(
                 total_nll -= log_probs[0, next_token_id].item()
                 total_tokens += 1
 
+            kv_cache_sizes.append(measure_kv_cache_gb(past_key_values))
+
     if total_tokens == 0:
         raise ValueError("No tokens were evaluated — check that texts are non-empty.")
 
-    return float(torch.exp(torch.tensor(total_nll / total_tokens)).item())
+    perplexity = float(torch.exp(torch.tensor(total_nll / total_tokens)).item())
+    avg_kv_cache_gb = sum(kv_cache_sizes) / len(kv_cache_sizes) if kv_cache_sizes else 0.0
+    return perplexity, avg_kv_cache_gb
 
 
 def build_cache_fn(config: dict, model: AutoModelForCausalLM):
@@ -289,7 +296,7 @@ def run_benchmark_official(
     eval_max_length = config.get("method_kwargs", {}).get("max_cache_size", max_length) \
         if config["method"] == "naive_truncation" else max_length
 
-    perplexity = compute_perplexity_with_cache(
+    perplexity, avg_kv_cache_gb = compute_perplexity_with_cache(
         model, tokenizer, texts,
         cache_update_fn=cache_fn,
         cache_reset_fn=reset_fn,
@@ -305,6 +312,7 @@ def run_benchmark_official(
         "avg_latency_ms_per_token": round(sum(latencies) / len(latencies), 4),
         "avg_throughput_tokens_per_sec": round(sum(throughputs) / len(throughputs), 4),
         "avg_peak_memory_gb": round(sum(memories) / len(memories), 4),
+        "avg_kv_cache_gb": round(avg_kv_cache_gb, 4),
         "perplexity": round(perplexity, 4),
     }
 

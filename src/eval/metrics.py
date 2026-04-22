@@ -138,3 +138,17 @@ def reset_peak_memory() -> None:
     """Reset the peak GPU memory counter. No-op on CPU."""
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
+
+
+def measure_kv_cache_gb(past_key_values) -> float:
+    """Return the current KV cache size in GB based on actual tensor shapes."""
+    try:
+        layer = past_key_values.layers[0]
+        n_layers = len(past_key_values.layers)
+        n_heads = layer.keys.shape[1]
+        head_dim = layer.keys.shape[-1]
+        seq_len = layer.keys.shape[2]
+        total_bytes = 2 * n_layers * n_heads * head_dim * seq_len * 2  # K+V, FP16
+        return total_bytes / (1024 ** 3)
+    except Exception:
+        return 0.0
